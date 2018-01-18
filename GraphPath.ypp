@@ -1,0 +1,460 @@
+%{
+    //  GraphPath.ypp -- Graph path language parser.
+    
+    #include <Helixstore/RelativeGraphPath.h>
+    #include <Helixstore/Streams.h>
+    #include <Shared/GraphPath.h>
+    #include <FEFoundation/Compiler.h>
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <stdarg.h>
+    #include <iostream>
+    #include <string>
+    #include <time.h>
+
+    #define YYERROR_VERBOSE
+    #define YYSIZE_Y size_t
+        
+    typedef void * yyscan_t;
+
+    class GraphPathParserContext {
+    public:
+    
+        GraphPathParserContext();
+    
+        ~GraphPathParserContext();
+    
+        yyscan_t                                    scanner_;
+    
+        bool                                        isSemantic_;
+        
+        bool                                        optionalKeyFound_;
+        
+        bool                                        optionalAliasFound_;
+
+        std::function<void(std::string, int)>       subgraph_;
+        
+        std::function<void(std::string, int)>       vertex_;
+
+        std::function<void(std::string, int)>       edge_;
+        
+        std::function<void(std::string)>            key_;
+        
+        std::function<void(std::string)>            alias_;
+        
+        std::function<void(RelativePathType, int)>  relativePath_;
+
+        int                                         subgraphCounter_;
+
+        int                                         vertexCounter_;
+        
+        int                                         edgeCounter_;
+
+    };
+    
+    GraphPathParserContext::GraphPathParserContext()
+    {
+        isSemantic_         = false;
+        optionalKeyFound_   = false;
+        optionalAliasFound_ = false;
+        subgraphCounter_    = 0;
+        vertexCounter_      = 0;
+        edgeCounter_        = 0;
+    }
+    
+    GraphPathParserContext::~GraphPathParserContext() {
+    }
+    
+    struct YYLTYPE;
+    union YYSTYPE;
+    int GraphPathlex_init_extra(void * user_defined, yyscan_t * ptr_yy_globals);
+    int GraphPathlex_destroy(yyscan_t yyscanner);
+    int GraphPathlex(YYSTYPE * lvalp, YYLTYPE * llocp, void * scanner);
+    void GraphPatherror(YYLTYPE * yylloc,
+        GraphPathParserContext * parserContext,
+        char const * msg);
+    int yyparse(GraphPathParserContext * parserContext);
+    
+    #define scanner parserContext->scanner_
+    
+    //#define GRAPHPATH_PARSER_TRACE
+    
+%}
+
+%pure-parser
+%lex-param { void * scanner }
+%parse-param { GraphPathParserContext * parserContext }
+%locations
+%name-prefix="GraphPath"
+
+%union {
+    int  intValue;
+    char * charValue; // Don't forget to deallocate the pointer after usage.
+    struct { RelativePathType type; int offset; } relPath;
+};
+
+%token 				DELIMITER_KEYWORD LBRACKET_KEYWORD RBRACKET_KEYWORD
+                    LT_KEYWORD GT_KEYWORD LBRACE_KEYWORD RBRACE_KEYWORD
+                    RELATIVE_GRAPHPATH
+
+%token <charValue>	REGULAR_TOKEN
+
+%type  <intValue> 	graph_path
+                    opt_subgraph_path subgraph_path subgraph_path_component
+                    opt_vertex_path_with_opt_edge_path
+                    edgeconnected_vertexpath
+                    vertex_path_component
+                    edge_path_component
+                    opt_key_component
+					relative_continuation
+
+%type <charValue>   opt_alias
+
+%type <relPath>     opt_delimited_relative_path
+
+%%
+
+graph_path:     opt_subgraph_path opt_vertex_path_with_opt_edge_path
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Reducing the graph path start rule"
+                            << std::endl;
+#endif
+                    }
+            ;
+
+opt_subgraph_path: /* empty */
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Parsing empty subgraph path"
+                            << std::endl;
+#endif
+                    }
+
+            |   subgraph_path
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Reducing subgraph_path"
+                            << std::endl;
+#endif
+                    }
+            ;
+
+subgraph_path:  subgraph_path_component opt_delimited_relative_path
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Reducing single (first) subgraph_path_component"
+                            << std::endl;
+#endif
+                    }
+
+            // Note that we're assuming parsing from left to right here.
+
+            |   subgraph_path_component DELIMITER_KEYWORD subgraph_path
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Parsing a nested subgraph path"
+                            << std::endl;
+#endif
+
+                    }
+            ;
+
+subgraph_path_component:
+                LBRACKET_KEYWORD REGULAR_TOKEN RBRACKET_KEYWORD
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Parsing subgraph_path_component"
+                            << std::endl;
+#endif
+
+                        parserContext->isSemantic_ = true;
+                        
+                        parserContext->subgraph_(
+                            $2,
+                            parserContext->subgraphCounter_
+                        );
+                        
+                        parserContext->subgraphCounter_++;
+                    }
+            ;
+
+opt_vertex_path_with_opt_edge_path: /* empty */
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Parsing empty optional vertex and optional "
+                                "edge path"
+                            << std::endl;
+#endif
+                    }
+
+            |  GT_KEYWORD DELIMITER_KEYWORD edgeconnected_vertexpath
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Reducing vertex_path_with_opt_edge_path"
+                            << std::endl;
+#endif
+                    }
+            ;
+
+edgeconnected_vertexpath:
+                vertex_path_component opt_delimited_relative_path
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Reducing vertex_path_component"
+                            << std::endl;
+#endif
+                        $$ = $1;
+                        
+                    }
+
+            |   vertex_path_component edge_path_component
+                opt_delimited_relative_path
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Reducing edge terminating path"
+                            << std::endl;
+#endif
+
+                        if (parserContext->optionalKeyFound_) {
+    
+                            throw CompilerError(kSourceLocationNone,
+                                "Edge-terminating graph path contains key"
+                            );
+    
+                        }
+                        
+                        $$ = $1;
+
+                    }
+
+            |   vertex_path_component edge_path_component
+                edgeconnected_vertexpath
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Reducing vertex_path_component"
+                            << std::endl;
+#endif
+
+                        bool optionalKeyFound = $1;
+                        
+                        if (optionalKeyFound) {
+    
+                            throw CompilerError(kSourceLocationNone,
+                                "Graph path key not in last vertex"
+                            );
+    
+                        }
+                        
+                        $$ = $3;
+
+                    }
+            ;
+
+vertex_path_component:
+                LT_KEYWORD REGULAR_TOKEN GT_KEYWORD
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Parsing vertex_path_component"
+                            << std::endl;
+#endif
+
+                        parserContext->isSemantic_ = true;
+
+                        parserContext->vertex_(
+                            $2,
+                            parserContext->vertexCounter_
+                        );
+                        
+                        parserContext->vertexCounter_++;
+                        
+                    } opt_key_component {
+                        
+                        $$ = $5;
+
+                    }
+            ;
+
+edge_path_component:
+                DELIMITER_KEYWORD REGULAR_TOKEN DELIMITER_KEYWORD
+                GT_KEYWORD
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut
+                            << "Parsing edge_path_component"
+                            << std::endl;
+#endif
+
+                        parserContext->isSemantic_ = true;
+                        
+                        parserContext->edge_($2, parserContext->edgeCounter_);
+                        
+                        parserContext->edgeCounter_++;
+                    }
+            ;
+
+opt_key_component: /* empty */
+                    {
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut << "No key component" << std::endl;
+#endif
+                        $$ = 0;
+                    }
+
+            |   LBRACE_KEYWORD REGULAR_TOKEN RBRACE_KEYWORD
+                    {
+                        
+#ifdef GRAPHPATH_PARSER_TRACE
+                        HelixstoreOut << "Parsing opt_key_component"
+                            << std::endl;
+#endif
+                        if (parserContext->optionalKeyFound_) {
+                            
+                            throw CompilerError(kSourceLocationNone,
+                                "Only one key allowed in a graph path"
+                            );
+                            
+                        }
+
+                        parserContext->optionalKeyFound_ = true;
+
+                        parserContext->key_($2);
+                        
+                        $$ = 1;
+                        
+                    } opt_alias { if ($5 != NULL) parserContext->alias_($5); }
+            ;
+
+opt_alias: /* empty */
+                    {
+                        $$ = NULL;
+                    }
+
+            |   REGULAR_TOKEN
+                    {
+                        parserContext->optionalAliasFound_ = true;
+                        
+                        parserContext->alias_($1);
+                    }
+            ;
+
+relative_continuation: /* empty */
+                    {
+                        $$ = NULL;
+                    }
+
+            |   subgraph_path
+                    {
+                        $$ = $1;
+                    }
+
+            |   edgeconnected_vertexpath
+                    {
+                        $$ = $1;
+                    }
+            ;
+
+opt_delimited_relative_path: /* empty */
+                    {
+                    }
+
+            |   RELATIVE_GRAPHPATH relative_continuation
+                    {
+                        RelativePathType pathType   = $$.type;
+                        int              offset     = $$.offset;
+                        
+                        parserContext->relativePath_(pathType, offset);
+                    }
+            ;
+
+%%
+
+typedef struct yy_buffer_state * YY_BUFFER_STATE;
+extern YY_BUFFER_STATE
+GraphPath_scan_string(const char * yy_str, yyscan_t yyscanner);
+extern void
+GraphPath_switch_to_buffer(YY_BUFFER_STATE new_buffer, yyscan_t yyscanner);
+extern void GraphPath_delete_buffer(YY_BUFFER_STATE b, yyscan_t yyscanner);
+
+std::pair<int, bool>
+graphPathParse(
+    std::string path,
+    std::function<void(std::string, int)>       subgraph,
+    std::function<void(std::string, int)>       vertex,
+    std::function<void(std::string, int)>       edge,
+    std::function<void(std::string)>            key,
+    std::function<void(std::string)>            alias,
+    std::function<void(RelativePathType, int)>  relativePath
+)
+{
+    GraphPathParserContext parserContext;
+    parserContext.subgraph_     = subgraph;
+    parserContext.vertex_       = vertex;
+    parserContext.edge_         = edge;
+    parserContext.key_          = key;
+    parserContext.alias_        = alias;
+    parserContext.relativePath_ = relativePath;
+    
+#ifdef GRAPHPATH_TRACE
+    HelixstoreOut << "Parsing graph path " << path << std::endl;
+#endif
+    
+    GraphPathlex_init_extra(&parserContext, &(parserContext.scanner_));
+    YY_BUFFER_STATE bp =
+        GraphPath_scan_string(path.c_str(), parserContext.scanner_);
+    GraphPath_switch_to_buffer(bp, parserContext.scanner_);
+    
+    int result = yyparse(&parserContext);
+    
+    return std::make_pair(result, parserContext.isSemantic_);
+}
+
+void
+GraphPatherror(
+    YYLTYPE                 * yylloc,
+    GraphPathParserContext  * parserContext,
+    char const              * msg)
+{
+    HelixstoreOut << msg << std::endl;
+}
+
+/*
+int main(int argc, char **argv)
+{
+    graphPathParse("[subgraph1]>--<vertex1>--edge1--><vertex2>{abc}",
+        [] (std::string subgraph, int count) {
+            HelixstoreOut << "Detected subgraph " << subgraph << std::endl;
+        },
+        [] (std::string vertex, int count) {
+            HelixstoreOut << "Detected vertex " << vertex << std::endl;
+        },
+        [] (std::string edge, int count) {
+            HelixstoreOut << "Detected edge " << edge << std::endl;
+        }, 
+        [] (std::string key) {
+            HelixstoreOut << "Detected edge " << edge << std::endl;
+        },
+        [] (std::string alias) {
+            HelixstoreOut << "Detected alias " << alias << std::endl;
+        },
+        [] (PathType type, int offset) {
+            HelixstoreOut << "Detected relative branch " << type << " " 
+				<< std::to_string(offset) << std::endl;
+        }
+    );
+ 
+    return 0;
+}
+*/

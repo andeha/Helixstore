@@ -1,0 +1,185 @@
+%{
+    //  GraphPath.lpp -- Flex scanner for the graph path language.
+
+    #include <Helixstore/RelativeGraphPath.h>
+    #include <Helixstore/Streams.h>
+    #include <Shared/GraphPath.h>
+    #include <FEFoundation/Compiler.h>
+	#include <iostream>
+    
+    //#define GRAPHPATH_SCANNER_TRACE
+%}
+
+%option reentrant
+%option bison-bridge
+%option bison-locations
+%option always-interactive
+%option yylineno
+%option nounistd
+%option prefix="GraphPath"
+%x TEMPORALREL_PATH STRUCTURALREL_PATH
+
+U       [\x80-\xbf]
+U2      [\xc2-\xdf]
+U3      [\xe0-\xef]
+U4      [\xf0-\xf4]
+
+%%
+
+"--"                            {
+
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found DELIMITER_KEYWORD"
+                                        << std::endl;
+#endif
+
+                                    return DELIMITER_KEYWORD;
+                                }
+											
+"["                             {
+
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found LBRACKET_KEYWORD"
+                                        << std::endl;
+#endif
+												
+                                    return LBRACKET_KEYWORD;
+                                }
+																
+"]"                             {
+
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found RBRACKET_KEYWORD"
+                                        << std::endl;
+#endif												
+												
+                                    return RBRACKET_KEYWORD;
+                                }
+											
+"<"                             {
+
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found LT_KEYWORD"
+                                        << std::endl;
+#endif												
+
+                                    return LT_KEYWORD;
+                                }
+																
+">"                             {
+
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found GT_KEYWORD"
+                                        << std::endl;
+#endif												
+												
+                                    return GT_KEYWORD;
+                                }
+
+"{"                             {
+    
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found LBRACE_KEYWORD"
+                                        << std::endl;
+#endif
+    
+                                    return LBRACE_KEYWORD;
+                                }
+
+"}"                             {
+    
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found RBRACE_KEYWORD"
+                                        << std::endl;
+#endif
+    
+                                    return RBRACE_KEYWORD;
+                                }
+
+"<<"                            {
+    
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found RTSHIFT_KEYWORD"
+                                        << std::endl;
+#endif
+
+                                    BEGIN(TEMPORALREL_PATH);
+
+                                }
+
+":>"                            {
+    
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found RSSHIFT_KEYWORD"
+                                        << std::endl;
+#endif
+
+                                    BEGIN(STRUCTURALREL_PATH);
+
+                                }
+
+<TEMPORALREL_PATH,STRUCTURALREL_PATH>[0-9]+ {
+    
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found RELATIVE_GRAPHPATH"
+                                        << std::endl;
+#endif
+
+                                    BEGIN(INITIAL);
+                                    
+                                    switch (YY_START) {
+                                        
+                                    case 1:
+									
+                                        yylval->relPath.type =
+                                            RelativePathType::Temporal;
+                                        break;
+                                        
+                                    case 2:
+									
+                                        yylval->relPath.type =
+                                           RelativePathType::Structural;
+                                        break;
+                                        
+                                    default:
+                                    
+                                        throw CompilerError(kSourceLocationNone,
+                                            "Unknown relative path type: "
+                                            "Neither temporal nor structural"
+                                        );
+                                        
+                                    }
+
+                                    yylval->relPath.offset = (int)atol(yytext);
+
+                                    return RELATIVE_GRAPHPATH;
+                                }
+
+([0-9a-zA-Z_+/=\.;'\"]|{U2}{U}|{U3}{U}{U}|{U4}{U}{U}{U})+ {
+                                    // TODO: Consider substituting REGULAR_TOKEN
+                                    //       to double-quoted string.
+
+#ifdef GRAPHPATH_SCANNER_TRACE
+                                    HelixstoreOut << "Found an REGULAR_TOKEN: "
+                                        << yytext << std::endl;
+#endif												
+												
+                                    yylval->charValue = strdup(yytext);
+												
+                                    return REGULAR_TOKEN;
+                                }
+											
+.|\t|\n                         {
+
+#ifdef GRAPHPATH_SCANNER_TRACE
+//                                    HelixstoreOut << "Skipping lex default"
+//                                        << std::endl;
+#endif											
+                                }
+						
+%%
+
+int yywrap(yyscan_t yyscanner)
+{
+    return 1;
+}
