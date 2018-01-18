@@ -1,3 +1,3 @@
 # Helixstore
 
-Compilable with antlr 4 or flex/bison.
+Compilable code for antlr 4 and flex/bison.
