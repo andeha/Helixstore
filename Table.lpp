@@ -1,0 +1,228 @@
+%{
+    //  Table.lpp -- Tabular report scanner for the Turbine language.
+    
+    #include <turbine/TableParserContext.h>
+    #include <Shared/TableParser.h>
+    
+    //#define REPORTPARSER_TRACE
+    
+%}
+
+%option reentrant
+%option bison-bridge
+%option bison-locations
+%option always-interactive
+%option yylineno
+%option nounistd
+%option prefix="Table"
+%x C_COMMENT QSTRING
+
+letter [A-Za-z_]
+digit  [0-9]
+id     {letter}({letter}|{digit})*
+
+%%
+
+"/*"                        {
+                                BEGIN(C_COMMENT);
+                            }
+
+<C_COMMENT>"*/"             {
+                                BEGIN(INITIAL);
+                            }
+
+<C_COMMENT>"\n"             {
+                                TableParserContext * parserContext =
+                                    (TableParserContext *)yyextra;
+                                
+                                parserContext->incrementLinenumber();
+                            }
+
+<C_COMMENT>.                {
+                            }
+
+"//"[^\n]*"\n"              {
+                                TableParserContext * parserContext =
+                                    (TableParserContext *)yyextra;
+                                
+                                parserContext->incrementLinenumber();
+                            }
+
+"'"                         {
+                                BEGIN(QSTRING);
+                                
+                                TableParserContext * parserContext =
+                                    (TableParserContext *)yyextra;
+                                
+                                parserContext->quotedStringStarted();
+                            }
+
+<QSTRING>"'"                {
+                                BEGIN(INITIAL);
+                                
+                                TableParserContext * parserContext =
+                                    (TableParserContext *)yyextra;
+                                
+                                yylval->charValue =
+                                    parserContext->quotedStringEnded();
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "Single-quoted string: " <<
+                                    yylval->charValue << std::endl;
+#endif
+                                
+                                return SQSTRING;
+                            }
+
+<QSTRING>\\[\\']            {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "Escaped single quote"
+                                    << std::endl;
+#endif
+                                
+                                TableParserContext * parserContext =
+                                    (TableParserContext *)yyextra;
+                                
+                                parserContext->quotedStringAdd(yytext[1]);
+                            }
+
+<QSTRING>"\n"               {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "Unterminated quoted string" <<
+                                    std::endl;
+#endif
+                                
+                                yyterminate();
+                            }
+
+<QSTRING>.                  {
+                                TableParserContext * parserContext =
+                                    (TableParserContext *)yyextra;
+                                
+                                parserContext->quotedStringAdd(*yytext);
+                            }
+
+"DUP"                       {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "DUP_KEYWORD" << std::endl;
+#endif
+                                
+                                return DUP_KEYWORD;
+                            }
+
+"POP"                       {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "POP_KEYWORD" << std::endl;
+#endif
+                                
+                                return POP_KEYWORD;
+                            }
+
+"SWAP"                      {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "SWAP_KEYWORD" << std::endl;
+#endif
+                                
+                                return SWAP_KEYWORD;
+                            }
+
+"+"                         {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "PLUS_KEYWORD" <<
+                                    std::endl;
+#endif
+                                
+                                return PLUS_KEYWORD;
+                            }
+
+"-"                         {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "MINUS_KEYWORD" <<
+                                    std::endl;
+#endif
+                                
+                                return MINUS_KEYWORD;
+                            }
+
+"*"                         {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "MULT_KEYWORD" <<
+                                    std::endl;
+#endif
+                                
+                                return MULT_KEYWORD;
+                            }
+
+"/"                         {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "DIV_KEYWORD" <<
+                                    std::endl;
+#endif
+                                
+                                return DIV_KEYWORD;
+                            }
+
+"REPORT"                    {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "REPORT_KEYWORD" << std::endl;
+#endif
+                                
+                                return REPORT_KEYWORD;
+                            }
+
+"BOLD"                     	{
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "BOLD_KEYWORD" << std::endl;
+#endif
+                                
+                                return BOLD_KEYWORD;
+                            }
+
+{id}                        {
+                                
+#ifdef REPORTPARSER_TRACE
+                                TurbineLog << "Identifier: " << yytext
+                                    << std::endl;
+#endif
+                                
+                                yylval->charValue = strdup(yytext);
+                                
+                                return IDENTIFIER;
+                            }
+
+"\n"                        {
+                                
+                                TableParserContext * parserContext =
+                                    (TableParserContext *)yyextra;
+                                
+                                parserContext->incrementLinenumber();
+                            }
+
+.                           {
+                                
+#ifdef REPORTPARSER_TRACE
+//                              TurbineLog << "Skipping lex default" <<
+//                                  std::endl;
+#endif
+                            }
+
+
+%%
+
+int yywrap(yyscan_t yyscanner)
+{
+    return 1;
+}
+
+

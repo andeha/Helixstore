@@ -1,0 +1,407 @@
+%{
+    
+    //  Table.ypp -- Tabular report language parser.
+    
+    #include <turbine/TableParserContext.h>
+    #include <turbine/BSimSimulator.h>
+    #include <boost/algorithm/string.hpp>
+    #include <iostream>
+    #include <fstream>
+    
+    struct YYLTYPE;
+    
+    union YYSTYPE;
+    
+    int Tablelex_init_extra(
+        void * user_defined,
+        yyscan_t * ptr_yy_globals
+    );
+    
+    int Tablelex_destroy(
+        yyscan_t yyscanner
+    );
+    
+    int Tablelex(
+        YYSTYPE * lvalp, 
+        YYLTYPE * llocp, 
+        void * scanner
+    );
+    
+    void Tableerror(
+        YYLTYPE * yylloc,
+        TableParserContext * parserContext,
+        char const * msg
+    );
+    
+    int yyparse(
+        TableParserContext * parserContext,
+        std::function<void (std::string)> progress
+    );
+    
+    #define scanner parserContext->scanner_
+    
+    #define PERFORM_ARITHMETIC_OPERATION(op)                        \
+        BSimDecimal arg1 = parserContext->evaluation_.top();        \
+        parserContext->evaluation_.pop();                           \
+        BSimDecimal arg2 = parserContext->evaluation_.top();        \
+        parserContext->evaluation_.pop();                           \
+        BSimDecimal result = arg1 op arg2;                          \
+        parserContext->evaluation_.push(result);
+    
+    // #define TABLEPARSER_TRACE
+    
+%}
+
+%pure-parser
+%lex-param { void * scanner }
+%parse-param { TableParserContext * parserContext }
+%locations
+%name-prefix="Table"
+
+%union {
+    char *      charValue;
+    bool        boolValue;
+    BSimDecimal decimalValue;
+};
+
+%token                      DUP_KEYWORD POP_KEYWORD SWAP_KEYWORD PLUS_KEYWORD
+                            MINUS_KEYWORD MULT_KEYWORD DIV_KEYWORD
+                            REPORT_KEYWORD BOLD_KEYWORD
+
+%type<decimalValue>         report
+
+%type <boolValue>           opt_bold
+
+%token <charValue>          IDENTIFIER SQSTRING
+
+%%
+
+report:        /* empty */
+                {
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "Empty report" << std::endl;
+#endif
+                }
+
+        |    report DUP_KEYWORD
+                {
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "DUP" << std::endl;
+#endif
+                    
+                    if (parserContext->evaluation_.size() >= 1) {
+                        
+                        BSimDecimal top = parserContext->evaluation_.top();
+                        
+                        parserContext->evaluation_.push(top);
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than one "
+                            "values when attempting to DUP"
+                        );
+                    }
+                }
+
+        |    report POP_KEYWORD
+                {
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "POP" << std::endl;
+#endif
+                    
+                    if (parserContext->evaluation_.size() >= 1) {
+                        
+                        parserContext->evaluation_.pop();
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than one "
+                            "values when attempting to POP"
+                        );
+                    }
+                }
+
+        |    report SWAP_KEYWORD
+                {
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "SWAP" << std::endl;
+#endif
+                    
+                    if (parserContext->evaluation_.size() >= 2) {
+                        
+                        BSimDecimal arg1 = parserContext->evaluation_.top();
+                        
+                        parserContext->evaluation_.pop();
+                        
+                        BSimDecimal arg2 = parserContext->evaluation_.top();
+                        
+                        parserContext->evaluation_.pop();
+                        
+                        parserContext->evaluation_.push(arg1);
+                        
+                        parserContext->evaluation_.push(arg2);
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than two "
+                            "values when attempting to SWAP"
+                        );
+                    }
+                }
+
+        |	report PLUS_KEYWORD
+                {
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "PLUS" << std::endl;
+#endif
+
+                    if (parserContext->evaluation_.size() >= 2) {
+                        
+                        PERFORM_ARITHMETIC_OPERATION(+)
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than two "
+                            "values when attempting to add"
+                        );
+                    }
+                }
+
+        |	report MINUS_KEYWORD
+                {
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "MINUS" << std::endl;
+#endif
+                    
+                    if (parserContext->evaluation_.size() >= 2) {
+                        
+                        PERFORM_ARITHMETIC_OPERATION(-)
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than two "
+                            "values when attempting to add"
+                        );
+                    }
+                }
+
+        |	report MULT_KEYWORD
+                {
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "MULT" << std::endl;
+#endif
+                    
+                    if (parserContext->evaluation_.size() >= 2) {
+                        
+                        PERFORM_ARITHMETIC_OPERATION(*)
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than two "
+                            "values when attempting to add"
+                        );
+                    }
+                    
+                }
+
+        |	report DIV_KEYWORD
+                {
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "DIV" << std::endl;
+#endif
+                    
+                    if (parserContext->evaluation_.size() >= 2) {
+                        
+                        PERFORM_ARITHMETIC_OPERATION(/)
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than two "
+                            "values when attempting to add"
+                        );
+                    }
+                }
+
+        |	report REPORT_KEYWORD opt_bold SQSTRING
+                {
+                    bool bold                   = $3;
+                    
+                    std::string quotedString    = std::string($4);
+                    
+#ifdef TABLEPARSER_TRACE
+                    TurbineLog << "REPORT " << (bold ? "BOLD " : "")
+                        << quotedString << std::endl;
+#endif                    
+                    if (parserContext->evaluation_.size() >= 1) {
+                        
+                        BSimDecimal top = parserContext->evaluation_.top();
+                        
+                        parserContext->evaluation_.pop();
+                        
+                        if (bold) {
+                            
+                            std::string b =
+                                boost::to_upper_copy<std::string>(quotedString);
+                            
+                            TurbineOut << b;
+                            
+                        }
+                        else {
+                            
+                            TurbineOut << quotedString;
+                            
+                        }
+                        
+                        TurbineOut << "\t" << ::Present(top) << std::endl;
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Table evaluation stack contains less than one "
+                            "values when attempting to REPORT"
+                        );
+                    }
+                }
+
+        |	report IDENTIFIER
+                {
+                    std::string identifier          = std::string($2);
+                    
+                    Chronology::Timestamp ts        = parserContext->ts_;
+                    
+                    MonteCarloState monteCarloState =
+                        parserContext->monteCarloState_;
+                    
+                    int iteration                   = parserContext->iteration_;
+                    
+                    SourceLocation sourceLocation   =
+                        parserContext->sourceLocation_;
+                    
+                    Expression::Result result =
+                        parserContext->getSimulator()->evaluateIdentifier(
+                            ts, monteCarloState, iteration,
+                            identifier, sourceLocation
+                        );
+                    
+                    if (result.type() == typeid(BSimDecimal)) {
+                        
+                        BSimDecimal value = boost::get<BSimDecimal>(result);
+                        
+#ifdef TABLEPARSER_TRACE
+                        TurbineLog << "Evaluated value of " << identifier
+                            << " is " << ::Present(value) << std::endl;
+#endif
+                        
+                        parserContext->evaluation_.push(value);
+                        
+                    }
+                    else {
+                        
+                        throw FundamentalError(
+                            "Evaluation of " + identifier +
+                            " does not result in a numerical value"
+                        );
+                        
+                    }
+                }
+        ;
+
+opt_bold:	/* empty */
+                {
+                    $$ = false;
+                }
+                
+        |    BOLD_KEYWORD
+                {
+                    $$ = true;
+                }
+        ;
+
+%%
+
+typedef struct yy_buffer_state *YY_BUFFER_STATE;
+extern YY_BUFFER_STATE Table_scan_string(const char *yy_str, yyscan_t yyscanner);
+extern void
+Table_switch_to_buffer(YY_BUFFER_STATE new_buffer, yyscan_t yyscanner);
+extern void Table_delete_buffer(YY_BUFFER_STATE b, yyscan_t yyscanner);
+
+bool
+tableParseString(
+    TableParserContext& parserContext,
+    std::string& program
+)
+{
+    Tablelex_init_extra(&parserContext, &(parserContext.scanner_));
+    YY_BUFFER_STATE bp =
+        Table_scan_string(program.c_str(), parserContext.scanner_);
+    Table_switch_to_buffer(bp, parserContext.scanner_);
+    
+    return yyparse(&parserContext);
+}
+
+bool
+tableParse(
+    Chronology::Timestamp ts,
+    MonteCarloState monteCarloState,
+    int iteration,
+    SourceLocation sourceLocation,
+    BSimSimulator * simulator,
+    std::string filePath
+)
+{
+    std::ifstream ifs(filePath.c_str());
+    std::string program((std::istreambuf_iterator<char>(ifs)),
+                        (std::istreambuf_iterator<char>()));
+                        
+    TableParserContext parserContext(filePath, simulator);
+    
+    parserContext.ts_               = ts;
+    parserContext.monteCarloState_  = monteCarloState;
+    parserContext.iteration_        = iteration;
+    parserContext.sourceLocation_   = sourceLocation;
+    
+    return tableParseString(parserContext, program);
+}
+
+void Tableerror(
+    YYLTYPE             * yylloc,
+    TableParserContext  * parserContext,
+    char const          * msg
+)
+{
+    std::string errorMsg = msg;
+    
+    errorMsg[0] = toupper(errorMsg[0]);
+    
+    /*
+    parserContext->attemptSendIssueToUI(
+        IssueType::Error,
+        std::string(errorMsg)
+    );
+    */
+    
+    throw ParserError(parserContext, errorMsg);
+}
+
+
